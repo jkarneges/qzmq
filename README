@@ -1,0 +1,12 @@
+QZmq
+----
+
+Yet another Qt binding for ZeroMQ. It wraps the C API of libzmq.
+
+To build the examples:
+
+  echo "LIBS += -lzmq" > conf.pri
+  qmake && make
+
+To include the code in your project, just use the files in src. From a qmake
+project you can include src.pri. It's your responsibility to link to libzmq.

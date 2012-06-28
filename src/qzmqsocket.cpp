@@ -3,12 +3,61 @@
 #include <stdio.h>
 #include <assert.h>
 #include <QStringList>
+#include <QTimer>
 #include <QSocketNotifier>
 #include <QMutex>
 #include <zmq.h>
 #include "qzmqcontext.h"
 
 namespace QZmq {
+
+static bool get_rcvmore(void *sock)
+{
+	qint64 more;
+	size_t opt_len = sizeof(more);
+	int ret = zmq_getsockopt(sock, ZMQ_RCVMORE, &more, &opt_len);
+	assert(ret == 0);
+	return more ? true : false;
+}
+
+static int get_fd(void *sock)
+{
+	int fd;
+	size_t opt_len = sizeof(fd);
+	int ret = zmq_getsockopt(sock, ZMQ_FD, &fd, &opt_len);
+	assert(ret == 0);
+	return fd;
+}
+
+static int get_events(void *sock)
+{
+	quint32 events;
+	size_t opt_len = sizeof(events);
+	int ret = zmq_getsockopt(sock, ZMQ_EVENTS, &events, &opt_len);
+	assert(ret == 0);
+	return (int)events;
+}
+
+static void set_subscribe(void *sock, const char *data, int size)
+{
+	size_t opt_len = size;
+	int ret = zmq_setsockopt(sock, ZMQ_SUBSCRIBE, data, opt_len);
+	assert(ret == 0);
+}
+
+static void set_unsubscribe(void *sock, const char *data, int size)
+{
+	size_t opt_len = size;
+	zmq_setsockopt(sock, ZMQ_UNSUBSCRIBE, data, opt_len);
+	// note: we ignore errors, such as unsubscribing a nonexisting filter
+}
+
+static void set_linger(void *sock, int value)
+{
+	size_t opt_len = sizeof(value);
+	int ret = zmq_setsockopt(sock, ZMQ_LINGER, &value, opt_len);
+	assert(ret == 0);
+}
 
 Q_GLOBAL_STATIC(QMutex, g_mutex)
 
@@ -63,13 +112,19 @@ public:
 	void *sock;
 	QSocketNotifier *sn_read;
 	bool canWrite, canRead;
+	QList<QByteArray> pendingRead;
+	bool readComplete;
 	QList<QList<QByteArray> > pendingWrites;
+	QTimer *updateTimer;
+	bool pendingUpdate;
 
 	Private(Socket *_q, Socket::Type type, Context *_context) :
 		QObject(_q),
 		q(_q),
 		canWrite(false),
-		canRead(false)
+		canRead(false),
+		readComplete(false),
+		pendingUpdate(false)
 	{
 		if(_context)
 		{
@@ -101,16 +156,18 @@ public:
 		sock = zmq_socket(context->context(), ztype);
 		assert(sock != NULL);
 
-		int fd;
-		size_t zmq_fd_size = sizeof(int);
-		zmq_getsockopt(sock, ZMQ_FD, &fd, &zmq_fd_size);
-		sn_read = new QSocketNotifier(fd, QSocketNotifier::Read, this);
+		sn_read = new QSocketNotifier(get_fd(sock), QSocketNotifier::Read, this);
 		connect(sn_read, SIGNAL(activated(int)), SLOT(sn_read_activated()));
 		sn_read->setEnabled(true);
+
+		updateTimer = new QTimer(this);
+		connect(updateTimer, SIGNAL(timeout()), SLOT(update_timeout()));
+		updateTimer->setSingleShot(true);
 	}
 
 	~Private()
 	{
+		set_linger(sock, 0);
 		zmq_close(sock);
 
 		if(usingGlobalContext)
@@ -119,121 +176,162 @@ public:
 
 	QList<QByteArray> read()
 	{
-		if(!canRead)
-			return QList<QByteArray>();
+		if(readComplete)
+		{
+			QList<QByteArray> out = pendingRead;
+			pendingRead.clear();
+			readComplete = false;
 
-		canRead = false;
+			if(canRead && !pendingUpdate)
+			{
+				pendingUpdate = true;
+				updateTimer->start();
+			}
 
-		QList<QByteArray> in;
-
-		qint64 more; // Multipart detection
-		while (1) {
-			zmq_msg_t reply;
-			zmq_msg_init(&reply);
-			zmq_recv(sock, &reply, 0);
-			QByteArray buf((const char *)zmq_msg_data(&reply), zmq_msg_size(&reply));
-			zmq_msg_close(&reply);
-			in += buf;
-
-			size_t more_size = sizeof (more);
-			zmq_getsockopt(sock, ZMQ_RCVMORE, &more, &more_size);
-			if(!more)
-				break;
+			return out;
 		}
-
-		processEvents();
-
-		return in;
+		else
+			return QList<QByteArray>();
 	}
 
 	void write(const QList<QByteArray> &message)
 	{
-		if(canWrite)
+		assert(!message.isEmpty());
+
+		pendingWrites += message;
+
+		if(canWrite && !pendingUpdate)
 		{
-			canWrite = false;
-
-			printf("writing immediately\n");
-			for(int n = 0; n < message.count(); ++n)
-			{
-				zmq_msg_t request;
-				zmq_msg_init_size(&request, message[n].size());
-				memcpy(zmq_msg_data(&request), message[n].data(), message[n].size());
-				zmq_send(sock, &request, n + 1 < message.count() ? ZMQ_SNDMORE : 0);
-			}
-
-			QMetaObject::invokeMethod(q, "messagesWritten", Qt::QueuedConnection, Q_ARG(int, 1));
-
-			processEvents();
-		}
-		else
-		{
-			printf("can't write yet, queuing\n");
-			pendingWrites += message;
+			pendingUpdate = true;
+			updateTimer->start();
 		}
 	}
 
-	int readEventsFlags()
+	void processEvents(bool *readyRead, int *messagesWritten)
 	{
-		size_t zmq_events_size = sizeof(quint32);
-		quint32 zmq_events;
-		zmq_getsockopt(sock, ZMQ_EVENTS, &zmq_events, &zmq_events_size);
-		QStringList list;
-		if(zmq_events & ZMQ_POLLIN)
-			list += "ZMQ_POLLIN";
-		if(zmq_events & ZMQ_POLLOUT)
-			list += "ZMQ_POLLOUT";
-		printf("events: %s\n", qPrintable(list.join(", ")));
-		return (int)zmq_events;
-	}
-
-	void processEvents()
-	{
-		int flags = readEventsFlags();
-
-		while(true)
+		bool again;
+		do
 		{
+			again = false;
+
+			int flags = get_events(sock);
+
 			if(flags & ZMQ_POLLOUT)
 			{
 				canWrite = true;
-
-				if(!pendingWrites.isEmpty())
-				{
-					canWrite = false;
-
-					QList<QByteArray> message = pendingWrites.takeFirst();
-					for(int n = 0; n < message.count(); ++n)
-					{
-						zmq_msg_t request;
-						zmq_msg_init_size(&request, message[n].size());
-						memcpy(zmq_msg_data(&request), message[n].data(), message[n].size());
-						zmq_send(sock, &request, n + 1 < message.count() ? ZMQ_SNDMORE : 0);
-					}
-
-					printf("wrote pending item\n");
-					QMetaObject::invokeMethod(q, "messagesWritten", Qt::QueuedConnection, Q_ARG(int, 1));
-
-					flags = readEventsFlags();
-					continue;
-				}
+				again = tryWrite(messagesWritten) || again;
 			}
 
 			if(flags & ZMQ_POLLIN)
 			{
 				canRead = true;
+				again = tryRead(readyRead) || again;
+			}
+		} while(again);
+	}
 
-				QMetaObject::invokeMethod(q, "readyRead", Qt::QueuedConnection);
+	bool tryWrite(int *messagesWritten)
+	{
+		if(!pendingWrites.isEmpty())
+		{
+			bool writeComplete = false;
+			QByteArray buf = pendingWrites.first().takeFirst();
+			if(pendingWrites.first().isEmpty())
+			{
+				pendingWrites.removeFirst();
+				writeComplete = true;
 			}
 
-			break;
+			zmq_msg_t msg;
+			int ret = zmq_msg_init_size(&msg, buf.size());
+			assert(ret == 0);
+			memcpy(zmq_msg_data(&msg), buf.data(), buf.size());
+			ret = zmq_send(sock, &msg, !writeComplete ? ZMQ_SNDMORE : 0);
+			assert(ret == 0);
+			ret = zmq_msg_close(&msg);
+			assert(ret == 0);
+
+			canWrite = false;
+
+			if(writeComplete)
+				++(*messagesWritten);
+
+			return true;
 		}
+
+		return false;
+	}
+
+	// return true if a read was performed
+	bool tryRead(bool *readyRead)
+	{
+		if(!readComplete)
+		{
+			zmq_msg_t msg;
+			int ret = zmq_msg_init(&msg);
+			assert(ret == 0);
+			ret = zmq_recv(sock, &msg, 0);
+			assert(ret == 0);
+			QByteArray buf((const char *)zmq_msg_data(&msg), zmq_msg_size(&msg));
+			ret = zmq_msg_close(&msg);
+			assert(ret == 0);
+
+			pendingRead += buf;
+			canRead = false;
+
+			if(!get_rcvmore(sock))
+			{
+				readComplete = true;
+				*readyRead = true;
+			}
+
+			return true;
+		}
+
+		return false;
 	}
 
 public slots:
 	void sn_read_activated()
 	{
-		printf("sn_read_activated\n");
+		bool readyRead = false;
+		int messagesWritten = 0;
 
-		processEvents();
+		processEvents(&readyRead, &messagesWritten);
+
+		if(readyRead)
+			emit q->readyRead();
+
+		if(messagesWritten > 0)
+			emit q->messagesWritten(messagesWritten);
+	}
+
+	void update_timeout()
+	{
+		pendingUpdate = false;
+
+		bool readyRead = false;
+		int messagesWritten = 0;
+
+		if(canWrite)
+		{
+			bool ret = tryWrite(&messagesWritten);
+			assert(ret);
+			processEvents(&readyRead, &messagesWritten);
+		}
+
+		if(canRead)
+		{
+			bool ret = tryRead(&readyRead);
+			assert(ret);
+			processEvents(&readyRead, &messagesWritten);
+		}
+
+		if(readyRead)
+			emit q->readyRead();
+
+		if(messagesWritten > 0)
+			emit q->messagesWritten(messagesWritten);
 	}
 };
 
@@ -252,6 +350,16 @@ Socket::Socket(Type type, Context *context, QObject *parent) :
 Socket::~Socket()
 {
 	delete d;
+}
+
+void Socket::subscribe(const QByteArray &filter)
+{
+	set_subscribe(d->sock, filter.data(), filter.size());
+}
+
+void Socket::unsubscribe(const QByteArray &filter)
+{
+	set_unsubscribe(d->sock, filter.data(), filter.size());
 }
 
 void Socket::connectToAddress(const QString &addr)

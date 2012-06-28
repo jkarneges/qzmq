@@ -29,6 +29,9 @@ public:
 	Socket(Type type, Context *context, QObject *parent = 0);
 	~Socket();
 
+	void subscribe(const QByteArray &filter);
+	void unsubscribe(const QByteArray &filter);
+
 	void connectToAddress(const QString &addr);
 	bool bind(const QString &addr);
 

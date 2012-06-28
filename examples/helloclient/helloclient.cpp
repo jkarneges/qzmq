@@ -14,9 +14,6 @@ public:
 	App() :
 		sock(QZmq::Socket::Req)
 	{
-		QTimer *t = new QTimer(this);
-		connect(t, SIGNAL(timeout()), SLOT(keepAlive()));
-		t->start(5000);
 	}
 
 public slots:
@@ -25,29 +22,25 @@ public slots:
 		connect(&sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
 		connect(&sock, SIGNAL(messagesWritten(int)), SLOT(sock_messagesWritten(int)));
 		sock.connectToAddress("tcp://localhost:5555");
-		sock.write(QList<QByteArray>() << "hello");
+		QByteArray out = "hello";
+		printf("writing: %s\n", out.data());
+		sock.write(QList<QByteArray>() << out);
 	}
 
 signals:
 	void quit();
 
 private slots:
-	void keepAlive()
-	{
-		//printf("still here\n");
-	}
-
 	void sock_readyRead()
 	{
-		printf("read\n");
 		QList<QByteArray> resp = sock.read();
-		printf("%s\n", resp[0].data());
+		printf("read: %s\n", resp[0].data());
 		emit quit();
 	}
 
 	void sock_messagesWritten(int count)
 	{
-		printf("written: %d\n", count);
+		printf("messages written: %d\n", count);
 	}
 };
 

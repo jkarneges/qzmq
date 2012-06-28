@@ -33,7 +33,9 @@ private slots:
 		}
 
 		printf("read: %s\n", msg.content()[0].data());
-		sock.write(msg.createReply(QList<QByteArray>() << "world"));
+		QByteArray out = "world";
+		printf("writing: %s\n", out.data());
+		sock.write(msg.createReply(QList<QByteArray>() << out));
 	}
 
 	void sock_messagesWritten(int count)

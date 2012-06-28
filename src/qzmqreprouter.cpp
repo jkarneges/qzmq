@@ -50,9 +50,9 @@ void RepRouter::connectToAddress(const QString &addr)
 	d->sock->connectToAddress(addr);
 }
 
-void RepRouter::bind(const QString &addr)
+bool RepRouter::bind(const QString &addr)
 {
-	d->sock->bind(addr);
+	return d->sock->bind(addr);
 }
 
 bool RepRouter::canRead() const

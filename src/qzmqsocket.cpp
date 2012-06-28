@@ -4,11 +4,53 @@
 #include <assert.h>
 #include <QStringList>
 #include <QSocketNotifier>
-#include "zmq.h"
+#include <QMutex>
+#include <zmq.h>
+#include "qzmqcontext.h"
 
 namespace QZmq {
 
-static void *g_context = 0;
+Q_GLOBAL_STATIC(QMutex, g_mutex)
+
+class Global
+{
+public:
+	Context context;
+	int refs;
+
+	Global() :
+		refs(0)
+	{
+	}
+};
+
+static Global *global = 0;
+
+static Context *addGlobalContextRef()
+{
+	QMutexLocker locker(g_mutex());
+
+	if(!global)
+		global = new Global;
+
+	++(global->refs);
+	return &(global->context);
+}
+
+static void removeGlobalContextRef()
+{
+	QMutexLocker locker(g_mutex());
+
+	assert(global);
+	assert(global->refs > 0);
+
+	--(global->refs);
+	if(global->refs == 0)
+	{
+		delete global;
+		global = 0;
+	}
+}
 
 class Socket::Private : public QObject
 {
@@ -16,19 +58,29 @@ class Socket::Private : public QObject
 
 public:
 	Socket *q;
+	bool usingGlobalContext;
+	Context *context;
 	void *sock;
 	QSocketNotifier *sn_read;
 	bool canWrite, canRead;
 	QList<QList<QByteArray> > pendingWrites;
 
-	Private(Socket *_q, Socket::Type type) :
+	Private(Socket *_q, Socket::Type type, Context *_context) :
 		QObject(_q),
 		q(_q),
 		canWrite(false),
 		canRead(false)
 	{
-		if(!g_context)
-			g_context = zmq_init(1);
+		if(_context)
+		{
+			usingGlobalContext = false;
+			context = _context;
+		}
+		else
+		{
+			usingGlobalContext = true;
+			context = addGlobalContextRef();
+		}
 
 		int ztype;
 		switch(type)
@@ -46,7 +98,9 @@ public:
 				assert(0);
 		}
 
-		sock = zmq_socket(g_context, ztype);
+		sock = zmq_socket(context->context(), ztype);
+		assert(sock != NULL);
+
 		int fd;
 		size_t zmq_fd_size = sizeof(int);
 		zmq_getsockopt(sock, ZMQ_FD, &fd, &zmq_fd_size);
@@ -59,8 +113,8 @@ public:
 	{
 		zmq_close(sock);
 
-		zmq_term(g_context);
-		g_context = 0;
+		if(usingGlobalContext)
+			removeGlobalContextRef();
 	}
 
 	QList<QByteArray> read()
@@ -186,7 +240,13 @@ public slots:
 Socket::Socket(Type type, QObject *parent) :
 	QObject(parent)
 {
-	d = new Private(this, type);
+	d = new Private(this, type, 0);
+}
+
+Socket::Socket(Type type, Context *context, QObject *parent) :
+	QObject(parent)
+{
+	d = new Private(this, type, context);
 }
 
 Socket::~Socket()
@@ -196,12 +256,17 @@ Socket::~Socket()
 
 void Socket::connectToAddress(const QString &addr)
 {
-	zmq_connect(d->sock, addr.toUtf8().data());
+	int ret = zmq_connect(d->sock, addr.toUtf8().data());
+	assert(ret == 0);
 }
 
-void Socket::bind(const QString &addr)
+bool Socket::bind(const QString &addr)
 {
-	zmq_bind(d->sock, addr.toUtf8().data());
+	int ret = zmq_bind(d->sock, addr.toUtf8().data());
+	if(ret != 0)
+		return false;
+
+	return true;
 }
 
 bool Socket::canRead() const

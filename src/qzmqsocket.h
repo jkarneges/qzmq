@@ -5,6 +5,8 @@
 
 namespace QZmq {
 
+class Context;
+
 class Socket : public QObject
 {
 	Q_OBJECT
@@ -24,10 +26,11 @@ public:
 	};
 
 	Socket(Type type, QObject *parent = 0);
+	Socket(Type type, Context *context, QObject *parent = 0);
 	~Socket();
 
 	void connectToAddress(const QString &addr);
-	void bind(const QString &addr);
+	bool bind(const QString &addr);
 
 	bool canRead() const;
 

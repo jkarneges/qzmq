@@ -16,7 +16,7 @@ public:
 	~RepRouter();
 
 	void connectToAddress(const QString &addr);
-	void bind(const QString &addr);
+	bool bind(const QString &addr);
 
 	bool canRead() const;
 

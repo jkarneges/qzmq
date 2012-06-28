@@ -379,7 +379,7 @@ bool Socket::bind(const QString &addr)
 
 bool Socket::canRead() const
 {
-	return d->canRead;
+	return d->readComplete;
 }
 
 QList<QByteArray> Socket::read()

@@ -15,6 +15,8 @@ public:
 	RepRouter(QObject *parent = 0);
 	~RepRouter();
 
+	void setShutdownWaitTime(int msecs);
+
 	void connectToAddress(const QString &addr);
 	bool bind(const QString &addr);
 

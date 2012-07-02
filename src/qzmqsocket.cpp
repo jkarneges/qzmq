@@ -117,6 +117,7 @@ public:
 	QList<QList<QByteArray> > pendingWrites;
 	QTimer *updateTimer;
 	bool pendingUpdate;
+	int shutdownWaitTime;
 
 	Private(Socket *_q, Socket::Type type, Context *_context) :
 		QObject(_q),
@@ -124,7 +125,8 @@ public:
 		canWrite(false),
 		canRead(false),
 		readComplete(false),
-		pendingUpdate(false)
+		pendingUpdate(false),
+		shutdownWaitTime(-1)
 	{
 		if(_context)
 		{
@@ -167,7 +169,7 @@ public:
 
 	~Private()
 	{
-		set_linger(sock, 0);
+		set_linger(sock, shutdownWaitTime);
 		zmq_close(sock);
 
 		if(usingGlobalContext)
@@ -350,6 +352,11 @@ Socket::Socket(Type type, Context *context, QObject *parent) :
 Socket::~Socket()
 {
 	delete d;
+}
+
+void Socket::setShutdownWaitTime(int msecs)
+{
+	d->shutdownWaitTime = msecs;
 }
 
 void Socket::subscribe(const QByteArray &filter)

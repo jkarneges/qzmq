@@ -29,6 +29,8 @@ public:
 	Socket(Type type, Context *context, QObject *parent = 0);
 	~Socket();
 
+	void setShutdownWaitTime(int msecs); // 0 means drop queue and don't block, -1 means infinite (default = -1)
+
 	void subscribe(const QByteArray &filter);
 	void unsubscribe(const QByteArray &filter);
 

@@ -45,6 +45,11 @@ RepRouter::~RepRouter()
 	delete d;
 }
 
+void RepRouter::setShutdownWaitTime(int msecs)
+{
+	d->sock->setShutdownWaitTime(msecs);
+}
+
 void RepRouter::connectToAddress(const QString &addr)
 {
 	d->sock->connectToAddress(addr);

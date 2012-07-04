@@ -6,6 +6,10 @@ namespace QZmq {
 class ReqMessage
 {
 public:
+	ReqMessage()
+	{
+	}
+
 	ReqMessage(const QList<QByteArray> &headers, const QList<QByteArray> &content) :
 		headers_(headers),
 		content_(content)
@@ -29,6 +33,8 @@ public:
 				content_ += part;
 		}
 	}
+
+	bool isNull() const { return headers_.isEmpty() && content_.isEmpty(); }
 
 	QList<QByteArray> headers() const { return headers_; }
 	QList<QByteArray> content() const { return content_; }

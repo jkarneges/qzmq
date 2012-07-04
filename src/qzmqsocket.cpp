@@ -114,7 +114,7 @@ public:
 	bool canWrite, canRead;
 	QList<QByteArray> pendingRead;
 	bool readComplete;
-	QList<QList<QByteArray> > pendingWrites;
+	QList< QList<QByteArray> > pendingWrites;
 	QTimer *updateTimer;
 	bool pendingUpdate;
 	int shutdownWaitTime;
@@ -317,16 +317,14 @@ public slots:
 
 		if(canWrite)
 		{
-			bool ret = tryWrite(&messagesWritten);
-			assert(ret);
-			processEvents(&readyRead, &messagesWritten);
+			if(tryWrite(&messagesWritten))
+				processEvents(&readyRead, &messagesWritten);
 		}
 
 		if(canRead)
 		{
-			bool ret = tryRead(&readyRead);
-			assert(ret);
-			processEvents(&readyRead, &messagesWritten);
+			if(tryRead(&readyRead))
+				processEvents(&readyRead, &messagesWritten);
 		}
 
 		if(readyRead)

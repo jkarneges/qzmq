@@ -21,7 +21,7 @@ public:
 	void close();
 
 signals:
-	void readyRead(const QList<QByteArray> &packet);
+	void readyRead(const QList<QByteArray> &message);
 
 private:
 	class Private;

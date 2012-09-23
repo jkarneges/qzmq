@@ -36,8 +36,8 @@ public:
 
 		while(isOpen && sock->canRead())
 		{
-			QList<QByteArray> packet = sock->read();
-			emit q->readyRead(packet);
+			QList<QByteArray> msg = sock->read();
+			emit q->readyRead(msg);
 			if(!self)
 				return;
 		}

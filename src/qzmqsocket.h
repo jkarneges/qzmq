@@ -34,6 +34,9 @@ public:
 	void subscribe(const QByteArray &filter);
 	void unsubscribe(const QByteArray &filter);
 
+	QByteArray identity() const;
+	void setIdentity(const QByteArray &id);
+
 	void connectToAddress(const QString &addr);
 	bool bind(const QString &addr);
 

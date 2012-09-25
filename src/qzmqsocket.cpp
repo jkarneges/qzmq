@@ -59,6 +59,23 @@ static void set_linger(void *sock, int value)
 	assert(ret == 0);
 }
 
+static int get_identity(void *sock, char *data, int size)
+{
+	size_t opt_len = size;
+	int ret = zmq_getsockopt(sock, ZMQ_IDENTITY, data, &opt_len);
+	assert(ret == 0);
+	return (int)opt_len;
+}
+
+static void set_identity(void *sock, const char *data, int size)
+{
+	size_t opt_len = size;
+	int ret = zmq_setsockopt(sock, ZMQ_IDENTITY, data, opt_len);
+	if(ret != 0)
+		printf("%d\n", errno);
+	assert(ret == 0);
+}
+
 Q_GLOBAL_STATIC(QMutex, g_mutex)
 
 class Global
@@ -365,6 +382,18 @@ void Socket::subscribe(const QByteArray &filter)
 void Socket::unsubscribe(const QByteArray &filter)
 {
 	set_unsubscribe(d->sock, filter.data(), filter.size());
+}
+
+QByteArray Socket::identity() const
+{
+	QByteArray buf(255, 0);
+	buf.resize(get_identity(d->sock, buf.data(), buf.size()));
+	return buf;
+}
+
+void Socket::setIdentity(const QByteArray &id)
+{
+	set_identity(d->sock, id.data(), id.size());
 }
 
 void Socket::connectToAddress(const QString &addr)

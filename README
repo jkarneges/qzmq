@@ -1,6 +1,6 @@
 QZmq
 ----
-Author: Justin Karneges <justin@affinix.com>
+Author: Justin Karneges <justin@fanout.io>
 
 Yet another Qt binding for ZeroMQ. It wraps the C API of libzmq.
 

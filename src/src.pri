@@ -1,5 +1,3 @@
-exists(../conf.pri):include(../conf.pri)
-
 HEADERS += \
 	$$PWD/qzmqcontext.h \
 	$$PWD/qzmqsocket.h \

@@ -60,10 +60,19 @@ public:
 	QByteArray identity() const;
 	void setIdentity(const QByteArray &id);
 
+	int hwm() const;
+	void setHwm(int hwm);
+
 	void connectToAddress(const QString &addr);
 	bool bind(const QString &addr);
 
 	bool canRead() const;
+
+	// returns true if this object believes the next write to zmq will
+	//   succeed immediately. note that it starts out false until the
+	//   value is discovered. also note that the write could still end up
+	//   needing to be queued, if the conditions change in between.
+	bool canWriteImmediately() const;
 
 	QList<QByteArray> read();
 	void write(const QList<QByteArray> &message);

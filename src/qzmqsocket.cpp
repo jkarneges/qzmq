@@ -99,6 +99,23 @@ static void set_identity(void *sock, const char *data, int size)
 	assert(ret == 0);
 }
 
+static int get_hwm(void *sock)
+{
+	quint64 hwm;
+	size_t opt_len = sizeof(hwm);
+	int ret = zmq_getsockopt(sock, ZMQ_HWM, &hwm, &opt_len);
+	assert(ret == 0);
+	return (int)hwm;
+}
+
+static void set_hwm(void *sock, int value)
+{
+	quint64 v = value;
+	size_t opt_len = sizeof(v);
+	int ret = zmq_setsockopt(sock, ZMQ_HWM, &v, opt_len);
+	assert(ret == 0);
+}
+
 Q_GLOBAL_STATIC(QMutex, g_mutex)
 
 class Global
@@ -276,27 +293,38 @@ public:
 	{
 		if(!pendingWrites.isEmpty())
 		{
-			bool writeComplete = false;
-			QByteArray buf = pendingWrites.first().takeFirst();
-			if(pendingWrites.first().isEmpty())
-			{
-				pendingWrites.removeFirst();
-				writeComplete = true;
-			}
+			QList<QByteArray> &message = pendingWrites.first();
+			QByteArray buf = message.first();
+
+			// whether this write succeeds or not, we assume we
+			//   can't write afterwards
+			canWrite = false;
 
 			zmq_msg_t msg;
 			int ret = zmq_msg_init_size(&msg, buf.size());
 			assert(ret == 0);
 			memcpy(zmq_msg_data(&msg), buf.data(), buf.size());
-			ret = zmq_send(sock, &msg, !writeComplete ? ZMQ_SNDMORE : 0);
-			assert(ret == 0);
+			ret = zmq_send(sock, &msg, ZMQ_NOBLOCK | (message.count() > 1 ? ZMQ_SNDMORE : 0));
+			if(ret == -1)
+			{
+				assert(errno == EAGAIN);
+				ret = zmq_msg_close(&msg);
+				assert(ret == 0);
+
+				// we return true here because we want to do
+				//   the same post-processing in a fail case
+				return true;
+			}
+
 			ret = zmq_msg_close(&msg);
 			assert(ret == 0);
 
-			canWrite = false;
-
-			if(writeComplete)
+			message.removeFirst();
+			if(message.isEmpty())
+			{
+				pendingWrites.removeFirst();
 				++(*messagesWritten);
+			}
 
 			return true;
 		}
@@ -419,6 +447,16 @@ void Socket::setIdentity(const QByteArray &id)
 	set_identity(d->sock, id.data(), id.size());
 }
 
+int Socket::hwm() const
+{
+	return get_hwm(d->sock);
+}
+
+void Socket::setHwm(int hwm)
+{
+	set_hwm(d->sock, hwm);
+}
+
 void Socket::connectToAddress(const QString &addr)
 {
 	int ret = zmq_connect(d->sock, addr.toUtf8().data());
@@ -437,6 +475,11 @@ bool Socket::bind(const QString &addr)
 bool Socket::canRead() const
 {
 	return d->readComplete;
+}
+
+bool Socket::canWriteImmediately() const
+{
+	return d->canWrite;
 }
 
 QList<QByteArray> Socket::read()

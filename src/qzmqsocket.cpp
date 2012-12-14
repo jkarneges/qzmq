@@ -280,6 +280,8 @@ public:
 				canWrite = true;
 				again = tryWrite(messagesWritten) || again;
 			}
+			else
+				canWrite = false;
 
 			if(flags & ZMQ_POLLIN)
 			{
@@ -311,9 +313,9 @@ public:
 				ret = zmq_msg_close(&msg);
 				assert(ret == 0);
 
-				// we return true here because we want to do
-				//   the same post-processing in a fail case
-				return true;
+				// if send fails, there should not be any
+				//   events change
+				return false;
 			}
 
 			ret = zmq_msg_close(&msg);

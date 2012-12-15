@@ -175,6 +175,7 @@ public:
 	QTimer *updateTimer;
 	bool pendingUpdate;
 	int shutdownWaitTime;
+	bool writeQueueEnabled;
 
 	Private(Socket *_q, Socket::Type type, Context *_context) :
 		QObject(_q),
@@ -183,7 +184,8 @@ public:
 		canRead(false),
 		readComplete(false),
 		pendingUpdate(false),
-		shutdownWaitTime(-1)
+		shutdownWaitTime(-1),
+		writeQueueEnabled(true)
 	{
 		if(_context)
 		{
@@ -257,12 +259,38 @@ public:
 	{
 		assert(!message.isEmpty());
 
-		pendingWrites += message;
-
-		if(canWrite && !pendingUpdate)
+		if(writeQueueEnabled)
 		{
-			pendingUpdate = true;
-			updateTimer->start();
+			pendingWrites += message;
+
+			if(canWrite && !pendingUpdate)
+			{
+				pendingUpdate = true;
+				updateTimer->start();
+			}
+		}
+		else
+		{
+			for(int n = 0; n < message.count(); ++n)
+			{
+				const QByteArray &buf = message[n];
+
+				zmq_msg_t msg;
+				int ret = zmq_msg_init_size(&msg, buf.size());
+				assert(ret == 0);
+				memcpy(zmq_msg_data(&msg), buf.data(), buf.size());
+				ret = zmq_send(sock, &msg, ZMQ_NOBLOCK | (n + 1 < message.count() ? ZMQ_SNDMORE : 0));
+				if(ret == -1)
+				{
+					assert(errno == EAGAIN);
+					ret = zmq_msg_close(&msg);
+					assert(ret == 0);
+					return;
+				}
+
+				ret = zmq_msg_close(&msg);
+				assert(ret == 0);
+			}
 		}
 	}
 
@@ -425,6 +453,11 @@ Socket::~Socket()
 void Socket::setShutdownWaitTime(int msecs)
 {
 	d->shutdownWaitTime = msecs;
+}
+
+void Socket::setWriteQueueEnabled(bool enable)
+{
+	d->writeQueueEnabled = enable;
 }
 
 void Socket::subscribe(const QByteArray &filter)

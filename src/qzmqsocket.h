@@ -52,7 +52,17 @@ public:
 	Socket(Type type, Context *context, QObject *parent = 0);
 	~Socket();
 
-	void setShutdownWaitTime(int msecs); // 0 means drop queue and don't block, -1 means infinite (default = -1)
+	// 0 means drop queue and don't block, -1 means infinite (default = -1)
+	void setShutdownWaitTime(int msecs);
+
+	// if enabled, messages are queued internally until the socket is able
+	//   to accept them. the messagesWritten signal is emitted once writes
+	//   have succeeded. otherwise, messages are passed directly to
+	//   zmq_send and dropped if they can't be written. default enabled.
+	// disabling the queue is good for socket types where the HWM has a
+	//   drop policy. enabling the queue is good when the HWM has a
+	//   blocking policy.
+	void setWriteQueueEnabled(bool enable);
 
 	void subscribe(const QByteArray &filter);
 	void unsubscribe(const QByteArray &filter);

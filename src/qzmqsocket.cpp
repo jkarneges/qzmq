@@ -34,15 +34,6 @@
 
 namespace QZmq {
 
-static bool get_rcvmore(void *sock)
-{
-	qint64 more;
-	size_t opt_len = sizeof(more);
-	int ret = zmq_getsockopt(sock, ZMQ_RCVMORE, &more, &opt_len);
-	assert(ret == 0);
-	return more ? true : false;
-}
-
 static int get_fd(void *sock)
 {
 	int fd;
@@ -50,15 +41,6 @@ static int get_fd(void *sock)
 	int ret = zmq_getsockopt(sock, ZMQ_FD, &fd, &opt_len);
 	assert(ret == 0);
 	return fd;
-}
-
-static int get_events(void *sock)
-{
-	quint32 events;
-	size_t opt_len = sizeof(events);
-	int ret = zmq_getsockopt(sock, ZMQ_EVENTS, &events, &opt_len);
-	assert(ret == 0);
-	return (int)events;
 }
 
 static void set_subscribe(void *sock, const char *data, int size)
@@ -99,6 +81,93 @@ static void set_identity(void *sock, const char *data, int size)
 	assert(ret == 0);
 }
 
+#if (ZMQ_VERSION_MAJOR >= 4) || ((ZMQ_VERSION_MAJOR >= 3) && (ZMQ_VERSION_MINOR >= 2))
+
+#define USE_MSG_IO
+
+static bool get_rcvmore(void *sock)
+{
+	int more;
+	size_t opt_len = sizeof(more);
+	int ret = zmq_getsockopt(sock, ZMQ_RCVMORE, &more, &opt_len);
+	assert(ret == 0);
+	return more ? true : false;
+}
+
+static int get_events(void *sock)
+{
+	int events;
+	size_t opt_len = sizeof(events);
+	int ret = zmq_getsockopt(sock, ZMQ_EVENTS, &events, &opt_len);
+	assert(ret == 0);
+	return (int)events;
+}
+
+static int get_sndhwm(void *sock)
+{
+	int hwm;
+	size_t opt_len = sizeof(hwm);
+	int ret = zmq_getsockopt(sock, ZMQ_SNDHWM, &hwm, &opt_len);
+	assert(ret == 0);
+	return (int)hwm;
+}
+
+static void set_sndhwm(void *sock, int value)
+{
+	int v = value;
+	size_t opt_len = sizeof(v);
+	int ret = zmq_setsockopt(sock, ZMQ_SNDHWM, &v, opt_len);
+	assert(ret == 0);
+}
+
+static int get_rcvhwm(void *sock)
+{
+	int hwm;
+	size_t opt_len = sizeof(hwm);
+	int ret = zmq_getsockopt(sock, ZMQ_RCVHWM, &hwm, &opt_len);
+	assert(ret == 0);
+	return (int)hwm;
+}
+
+static void set_rcvhwm(void *sock, int value)
+{
+	int v = value;
+	size_t opt_len = sizeof(v);
+	int ret = zmq_setsockopt(sock, ZMQ_RCVHWM, &v, opt_len);
+	assert(ret == 0);
+}
+
+static int get_hwm(void *sock)
+{
+	return get_sndhwm(sock);
+}
+
+static void set_hwm(void *sock, int value)
+{
+	set_sndhwm(sock, value);
+	set_rcvhwm(sock, value);
+}
+
+#else
+
+static bool get_rcvmore(void *sock)
+{
+	qint64 more;
+	size_t opt_len = sizeof(more);
+	int ret = zmq_getsockopt(sock, ZMQ_RCVMORE, &more, &opt_len);
+	assert(ret == 0);
+	return more ? true : false;
+}
+
+static int get_events(void *sock)
+{
+	quint32 events;
+	size_t opt_len = sizeof(events);
+	int ret = zmq_getsockopt(sock, ZMQ_EVENTS, &events, &opt_len);
+	assert(ret == 0);
+	return (int)events;
+}
+
 static int get_hwm(void *sock)
 {
 	quint64 hwm;
@@ -115,6 +184,28 @@ static void set_hwm(void *sock, int value)
 	int ret = zmq_setsockopt(sock, ZMQ_HWM, &v, opt_len);
 	assert(ret == 0);
 }
+
+static int get_sndhwm(void *sock)
+{
+	return get_hwm(sock);
+}
+
+static void set_sndhwm(void *sock, int value)
+{
+	set_hwm(sock, value);
+}
+
+static int get_rcvhwm(void *sock)
+{
+	return get_hwm(sock);
+}
+
+static void set_rcvhwm(void *sock, int value)
+{
+	set_hwm(sock, value);
+}
+
+#endif
 
 Q_GLOBAL_STATIC(QMutex, g_mutex)
 
@@ -279,7 +370,11 @@ public:
 				int ret = zmq_msg_init_size(&msg, buf.size());
 				assert(ret == 0);
 				memcpy(zmq_msg_data(&msg), buf.data(), buf.size());
+#ifdef USE_MSG_IO
+				ret = zmq_msg_send(&msg, sock, ZMQ_DONTWAIT | (n + 1 < message.count() ? ZMQ_SNDMORE : 0));
+#else
 				ret = zmq_send(sock, &msg, ZMQ_NOBLOCK | (n + 1 < message.count() ? ZMQ_SNDMORE : 0));
+#endif
 				if(ret == -1)
 				{
 					assert(errno == EAGAIN);
@@ -334,7 +429,11 @@ public:
 			int ret = zmq_msg_init_size(&msg, buf.size());
 			assert(ret == 0);
 			memcpy(zmq_msg_data(&msg), buf.data(), buf.size());
+#ifdef USE_MSG_IO
+			ret = zmq_msg_send(&msg, sock, ZMQ_DONTWAIT | (message.count() > 1 ? ZMQ_SNDMORE : 0));
+#else
 			ret = zmq_send(sock, &msg, ZMQ_NOBLOCK | (message.count() > 1 ? ZMQ_SNDMORE : 0));
+#endif
 			if(ret == -1)
 			{
 				assert(errno == EAGAIN);
@@ -370,8 +469,12 @@ public:
 			zmq_msg_t msg;
 			int ret = zmq_msg_init(&msg);
 			assert(ret == 0);
+#ifdef USE_MSG_IO
+			ret = zmq_msg_recv(&msg, sock, 0);
+#else
 			ret = zmq_recv(sock, &msg, 0);
-			assert(ret == 0);
+#endif
+			assert(ret != -1);
 			QByteArray buf((const char *)zmq_msg_data(&msg), zmq_msg_size(&msg));
 			ret = zmq_msg_close(&msg);
 			assert(ret == 0);
@@ -490,6 +593,26 @@ int Socket::hwm() const
 void Socket::setHwm(int hwm)
 {
 	set_hwm(d->sock, hwm);
+}
+
+int Socket::sendHwm() const
+{
+	return get_sndhwm(d->sock);
+}
+
+int Socket::receiveHwm() const
+{
+	return get_rcvhwm(d->sock);
+}
+
+void Socket::setSendHwm(int hwm)
+{
+	set_sndhwm(d->sock, hwm);
+}
+
+void Socket::setReceiveHwm(int hwm)
+{
+	set_rcvhwm(d->sock, hwm);
 }
 
 void Socket::connectToAddress(const QString &addr)

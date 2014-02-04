@@ -70,8 +70,14 @@ public:
 	QByteArray identity() const;
 	void setIdentity(const QByteArray &id);
 
+	// deprecated, zmq 2.x
 	int hwm() const;
 	void setHwm(int hwm);
+
+	int sendHwm() const;
+	int receiveHwm() const;
+	void setSendHwm(int hwm);
+	void setReceiveHwm(int hwm);
 
 	void connectToAddress(const QString &addr);
 	bool bind(const QString &addr);

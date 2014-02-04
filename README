@@ -2,7 +2,8 @@ QZmq
 ----
 Author: Justin Karneges <justin@fanout.io>
 
-Yet another Qt binding for ZeroMQ. It wraps the C API of libzmq.
+Yet another Qt binding for ZeroMQ. It wraps the C API of libzmq. It is
+compatible with libzmq versions 2.x, 3.x, and 4.x.
 
 Some features:
   - Completely event-driven, with both read and write notifications.

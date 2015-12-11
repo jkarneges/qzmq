@@ -81,6 +81,28 @@ static void set_identity(void *sock, const char *data, int size)
 	assert(ret == 0);
 }
 
+#if ZMQ_VERSION_MAJOR >= 4
+
+static void set_immediate(void *sock, bool on)
+{
+	int v = on ? 1 : 0;
+	size_t opt_len = sizeof(v);
+	int ret = zmq_setsockopt(sock, ZMQ_IMMEDIATE, &v, opt_len);
+	assert(ret == 0);
+}
+
+#else
+
+static void set_immediate(void *sock, bool on)
+{
+	int v = on ? 1 : 0;
+	size_t opt_len = sizeof(v);
+	int ret = zmq_setsockopt(sock, ZMQ_DELAY_ATTACH_ON_CONNECT, &v, opt_len);
+	assert(ret == 0);
+}
+
+#endif
+
 #if (ZMQ_VERSION_MAJOR >= 4) || ((ZMQ_VERSION_MAJOR >= 3) && (ZMQ_VERSION_MINOR >= 2))
 
 #define USE_MSG_IO
@@ -146,14 +168,6 @@ static void set_hwm(void *sock, int value)
 {
 	set_sndhwm(sock, value);
 	set_rcvhwm(sock, value);
-}
-
-static void set_immediate(void *sock, bool on)
-{
-	int v = on ? 1 : 0;
-	size_t opt_len = sizeof(v);
-	int ret = zmq_setsockopt(sock, ZMQ_IMMEDIATE, &v, opt_len);
-	assert(ret == 0);
 }
 
 static void set_tcp_keepalive(void *sock, int value)
@@ -243,13 +257,6 @@ static int get_rcvhwm(void *sock)
 static void set_rcvhwm(void *sock, int value)
 {
 	set_hwm(sock, value);
-}
-
-static void set_immediate(void *sock, bool on)
-{
-	// not supported for this zmq version
-	Q_UNUSED(sock);
-	Q_UNUSED(on);
 }
 
 static void set_tcp_keepalive(void *sock, int value)

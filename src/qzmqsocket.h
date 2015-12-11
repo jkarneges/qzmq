@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 Justin Karneges
+ * Copyright (C) 2012-2015 Justin Karneges
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -78,6 +78,11 @@ public:
 	int receiveHwm() const;
 	void setSendHwm(int hwm);
 	void setReceiveHwm(int hwm);
+
+	void setImmediateEnabled(bool on);
+
+	void setTcpKeepAliveEnabled(bool on);
+	void setTcpKeepAliveParameters(int idle = -1, int count = -1, int interval = -1);
 
 	void connectToAddress(const QString &addr);
 	bool bind(const QString &addr);

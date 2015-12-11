@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 Justin Karneges
+ * Copyright (C) 2012-2015 Justin Karneges
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -148,6 +148,46 @@ static void set_hwm(void *sock, int value)
 	set_rcvhwm(sock, value);
 }
 
+static void set_immediate(void *sock, bool on)
+{
+	int v = on ? 1 : 0;
+	size_t opt_len = sizeof(v);
+	int ret = zmq_setsockopt(sock, ZMQ_IMMEDIATE, &v, opt_len);
+	assert(ret == 0);
+}
+
+static void set_tcp_keepalive(void *sock, int value)
+{
+	int v = value;
+	size_t opt_len = sizeof(v);
+	int ret = zmq_setsockopt(sock, ZMQ_TCP_KEEPALIVE, &v, opt_len);
+	assert(ret == 0);
+}
+
+static void set_tcp_keepalive_idle(void *sock, int value)
+{
+	int v = value;
+	size_t opt_len = sizeof(v);
+	int ret = zmq_setsockopt(sock, ZMQ_TCP_KEEPALIVE_IDLE, &v, opt_len);
+	assert(ret == 0);
+}
+
+static void set_tcp_keepalive_cnt(void *sock, int value)
+{
+	int v = value;
+	size_t opt_len = sizeof(v);
+	int ret = zmq_setsockopt(sock, ZMQ_TCP_KEEPALIVE_CNT, &v, opt_len);
+	assert(ret == 0);
+}
+
+static void set_tcp_keepalive_intvl(void *sock, int value)
+{
+	int v = value;
+	size_t opt_len = sizeof(v);
+	int ret = zmq_setsockopt(sock, ZMQ_TCP_KEEPALIVE_INTVL, &v, opt_len);
+	assert(ret == 0);
+}
+
 #else
 
 static bool get_rcvmore(void *sock)
@@ -203,6 +243,41 @@ static int get_rcvhwm(void *sock)
 static void set_rcvhwm(void *sock, int value)
 {
 	set_hwm(sock, value);
+}
+
+static void set_immediate(void *sock, bool on)
+{
+	// not supported for this zmq version
+	Q_UNUSED(sock);
+	Q_UNUSED(on);
+}
+
+static void set_tcp_keepalive(void *sock, int value)
+{
+	// not supported for this zmq version
+	Q_UNUSED(sock);
+	Q_UNUSED(on);
+}
+
+static void set_tcp_keepalive_idle(void *sock, int value)
+{
+	// not supported for this zmq version
+	Q_UNUSED(sock);
+	Q_UNUSED(on);
+}
+
+static void set_tcp_keepalive_cnt(void *sock, int value)
+{
+	// not supported for this zmq version
+	Q_UNUSED(sock);
+	Q_UNUSED(on);
+}
+
+static void set_tcp_keepalive_intvl(void *sock, int value)
+{
+	// not supported for this zmq version
+	Q_UNUSED(sock);
+	Q_UNUSED(on);
 }
 
 #endif
@@ -613,6 +688,23 @@ void Socket::setSendHwm(int hwm)
 void Socket::setReceiveHwm(int hwm)
 {
 	set_rcvhwm(d->sock, hwm);
+}
+
+void Socket::setImmediateEnabled(bool on)
+{
+	set_immediate(d->sock, on);
+}
+
+void Socket::setTcpKeepAliveEnabled(bool on)
+{
+	set_tcp_keepalive(d->sock, on ? 1 : 0);
+}
+
+void Socket::setTcpKeepAliveParameters(int idle, int count, int interval)
+{
+	set_tcp_keepalive_idle(d->sock, idle);
+	set_tcp_keepalive_cnt(d->sock, count);
+	set_tcp_keepalive_intvl(d->sock, interval);
 }
 
 void Socket::connectToAddress(const QString &addr)

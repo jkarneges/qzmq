@@ -37,13 +37,15 @@ public:
 	QZmq::Socket *sock;
 	bool isOpen;
 	bool pendingRead;
+	int maxReadsPerEvent;
 
 	Private(Valve *_q) :
 		QObject(_q),
 		q(_q),
 		sock(0),
 		isOpen(false),
-		pendingRead(false)
+		pendingRead(false),
+		maxReadsPerEvent(100)
 	{
 	}
 
@@ -53,12 +55,28 @@ public:
 		connect(sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
 	}
 
+	void queueRead()
+	{
+		if(pendingRead)
+			return;
+
+		pendingRead = true;
+		QMetaObject::invokeMethod(this, "queuedRead", Qt::QueuedConnection);
+	}
+
 	void tryRead()
 	{
 		QPointer<QObject> self = this;
 
+		int count = 0;
 		while(isOpen && sock->canRead())
 		{
+			if(count >= maxReadsPerEvent)
+			{
+				queueRead();
+				return;
+			}
+
 			QList<QByteArray> msg = sock->read();
 			emit q->readyRead(msg);
 			if(!self)
@@ -96,16 +114,18 @@ bool Valve::isOpen() const
 	return d->isOpen;
 }
 
+void Valve::setMaxReadsPerEvent(int max)
+{
+	d->maxReadsPerEvent = max;
+}
+
 void Valve::open()
 {
 	if(!d->isOpen)
 	{
 		d->isOpen = true;
 		if(!d->pendingRead && d->sock->canRead())
-		{
-			d->pendingRead = true;
-			QMetaObject::invokeMethod(d, "queuedRead", Qt::QueuedConnection);
-		}
+			d->queueRead();
 	}
 }
 

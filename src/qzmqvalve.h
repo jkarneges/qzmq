@@ -40,6 +40,8 @@ public:
 
 	bool isOpen() const;
 
+	void setMaxReadsPerEvent(int max);
+
 	void open();
 	void close();
 

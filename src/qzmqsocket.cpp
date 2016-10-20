@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2015 Justin Karneges
+ * Copyright (C) 2012-2016 Justin Karneges
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <QStringList>
+#include <QPointer>
 #include <QTimer>
 #include <QSocketNotifier>
 #include <QMutex>
@@ -342,9 +343,8 @@ public:
 	void *sock;
 	QSocketNotifier *sn_read;
 	bool canWrite, canRead;
-	QList<QByteArray> pendingRead;
-	bool readComplete;
 	QList< QList<QByteArray> > pendingWrites;
+	int pendingWritten;
 	QTimer *updateTimer;
 	bool pendingUpdate;
 	int shutdownWaitTime;
@@ -355,7 +355,7 @@ public:
 		q(_q),
 		canWrite(false),
 		canRead(false),
-		readComplete(false),
+		pendingWritten(0),
 		pendingUpdate(false),
 		shutdownWaitTime(-1),
 		writeQueueEnabled(true)
@@ -401,6 +401,10 @@ public:
 
 	~Private()
 	{
+		updateTimer->disconnect(this);
+		updateTimer->setParent(0);
+		updateTimer->deleteLater();
+
 		set_linger(sock, shutdownWaitTime);
 		zmq_close(sock);
 
@@ -408,19 +412,43 @@ public:
 			removeGlobalContextRef();
 	}
 
+	void update()
+	{
+		if(!pendingUpdate)
+		{
+			pendingUpdate = true;
+			updateTimer->start();
+		}
+	}
+
 	QList<QByteArray> read()
 	{
-		if(readComplete)
+		if(canRead)
 		{
-			QList<QByteArray> out = pendingRead;
-			pendingRead.clear();
-			readComplete = false;
+			QList<QByteArray> out;
 
-			if(canRead && !pendingUpdate)
+			do
 			{
-				pendingUpdate = true;
-				updateTimer->start();
-			}
+				zmq_msg_t msg;
+				int ret = zmq_msg_init(&msg);
+				assert(ret == 0);
+#ifdef USE_MSG_IO
+				ret = zmq_msg_recv(&msg, sock, 0);
+#else
+				ret = zmq_recv(sock, &msg, 0);
+#endif
+				assert(ret != -1);
+				QByteArray buf((const char *)zmq_msg_data(&msg), zmq_msg_size(&msg));
+				ret = zmq_msg_close(&msg);
+				assert(ret == 0);
+
+				out += buf;
+			} while(get_rcvmore(sock));
+
+			processEvents();
+
+			if((canWrite && !pendingWrites.isEmpty()) || canRead)
+				update();
 
 			return out;
 		}
@@ -436,185 +464,140 @@ public:
 		{
 			pendingWrites += message;
 
-			if(canWrite && !pendingUpdate)
-			{
-				pendingUpdate = true;
-				updateTimer->start();
-			}
+			if(canWrite)
+				update();
 		}
 		else
 		{
-			for(int n = 0; n < message.count(); ++n)
+			if(!zmqWrite(message))
 			{
-				const QByteArray &buf = message[n];
-
-				zmq_msg_t msg;
-				int ret = zmq_msg_init_size(&msg, buf.size());
-				assert(ret == 0);
-				memcpy(zmq_msg_data(&msg), buf.data(), buf.size());
-#ifdef USE_MSG_IO
-				ret = zmq_msg_send(&msg, sock, ZMQ_DONTWAIT | (n + 1 < message.count() ? ZMQ_SNDMORE : 0));
-#else
-				ret = zmq_send(sock, &msg, ZMQ_NOBLOCK | (n + 1 < message.count() ? ZMQ_SNDMORE : 0));
-#endif
-				if(ret == -1)
-				{
-					assert(errno == EAGAIN);
-					ret = zmq_msg_close(&msg);
-					assert(ret == 0);
-					return;
-				}
-
-				ret = zmq_msg_close(&msg);
-				assert(ret == 0);
+				// if send fails, there should not be any events change
+				return;
 			}
+
+			++pendingWritten;
+
+			processEvents();
+
+			if(pendingWritten > 0 || canRead)
+				update();
 		}
 	}
 
-	void processEvents(bool *readyRead, int *messagesWritten)
+	// return true if flags changed
+	bool processEvents()
 	{
-		bool again;
-		do
-		{
-			again = false;
+		int flags = get_events(sock);
 
-			int flags = get_events(sock);
+		bool canWriteOld = canWrite;
+		bool canReadOld = canRead;
 
-			if(flags & ZMQ_POLLOUT)
-			{
-				canWrite = true;
-				again = tryWrite(messagesWritten) || again;
-			}
-			else
-				canWrite = false;
+		canWrite = (flags & ZMQ_POLLOUT);
+		canRead = (flags & ZMQ_POLLIN);
 
-			if(flags & ZMQ_POLLIN)
-			{
-				canRead = true;
-				again = tryRead(readyRead) || again;
-			}
-		} while(again);
+		return (canWrite != canWriteOld || canRead != canReadOld);
 	}
 
-	bool tryWrite(int *messagesWritten)
+	bool zmqWrite(const QList<QByteArray> &message)
 	{
-		if(!pendingWrites.isEmpty())
-		{
-			QList<QByteArray> &message = pendingWrites.first();
-			QByteArray buf = message.first();
+		bool wrotePart = false;
 
-			// whether this write succeeds or not, we assume we
-			//   can't write afterwards
-			canWrite = false;
+		for(int n = 0; n < message.count(); ++n)
+		{
+			const QByteArray &buf = message[n];
 
 			zmq_msg_t msg;
 			int ret = zmq_msg_init_size(&msg, buf.size());
 			assert(ret == 0);
 			memcpy(zmq_msg_data(&msg), buf.data(), buf.size());
 #ifdef USE_MSG_IO
-			ret = zmq_msg_send(&msg, sock, ZMQ_DONTWAIT | (message.count() > 1 ? ZMQ_SNDMORE : 0));
+			ret = zmq_msg_send(&msg, sock, ZMQ_DONTWAIT | (n + 1 < message.count() ? ZMQ_SNDMORE : 0));
 #else
-			ret = zmq_send(sock, &msg, ZMQ_NOBLOCK | (message.count() > 1 ? ZMQ_SNDMORE : 0));
+			ret = zmq_send(sock, &msg, ZMQ_NOBLOCK | (n + 1 < message.count() ? ZMQ_SNDMORE : 0));
 #endif
 			if(ret == -1)
 			{
+				// if we error after writing a message part, that's really bad
+				assert(!wrotePart);
+
 				assert(errno == EAGAIN);
+
 				ret = zmq_msg_close(&msg);
 				assert(ret == 0);
-
-				// if send fails, there should not be any
-				//   events change
 				return false;
 			}
 
 			ret = zmq_msg_close(&msg);
 			assert(ret == 0);
 
-			message.removeFirst();
-			if(message.isEmpty())
-			{
-				pendingWrites.removeFirst();
-				++(*messagesWritten);
-			}
-
-			return true;
+			wrotePart = true;
 		}
 
-		return false;
+		return true;
 	}
 
-	// return true if a read was performed
-	bool tryRead(bool *readyRead)
+	void tryWrite()
 	{
-		if(!readComplete)
+		while(canWrite && !pendingWrites.isEmpty())
 		{
-			zmq_msg_t msg;
-			int ret = zmq_msg_init(&msg);
-			assert(ret == 0);
-#ifdef USE_MSG_IO
-			ret = zmq_msg_recv(&msg, sock, 0);
-#else
-			ret = zmq_recv(sock, &msg, 0);
-#endif
-			assert(ret != -1);
-			QByteArray buf((const char *)zmq_msg_data(&msg), zmq_msg_size(&msg));
-			ret = zmq_msg_close(&msg);
-			assert(ret == 0);
+			// whether this write succeeds or not, we assume we
+			//   can't write afterwards
+			canWrite = false;
 
-			pendingRead += buf;
-			canRead = false;
-
-			if(!get_rcvmore(sock))
+			if(!zmqWrite(pendingWrites.first()))
 			{
-				readComplete = true;
-				*readyRead = true;
+				// if send fails, there should not be any events change
+				return;
 			}
 
-			return true;
+			pendingWrites.removeFirst();
+			++pendingWritten;
+
+			processEvents();
+		}
+	}
+
+	void doUpdate()
+	{
+		tryWrite();
+
+		if(canRead)
+		{
+			QPointer<QObject> self = this;
+			emit q->readyRead();
+			if(!self)
+				return;
 		}
 
-		return false;
+		if(pendingWritten > 0)
+		{
+			int count = pendingWritten;
+			pendingWritten = 0;
+
+			emit q->messagesWritten(count);
+		}
 	}
 
 public slots:
 	void sn_read_activated()
 	{
-		bool readyRead = false;
-		int messagesWritten = 0;
+		if(!processEvents())
+			return;
 
-		processEvents(&readyRead, &messagesWritten);
+		if(pendingUpdate)
+		{
+			pendingUpdate = false;
+			updateTimer->stop();
+		}
 
-		if(readyRead)
-			emit q->readyRead();
-
-		if(messagesWritten > 0)
-			emit q->messagesWritten(messagesWritten);
+		doUpdate();
 	}
 
 	void update_timeout()
 	{
 		pendingUpdate = false;
 
-		bool readyRead = false;
-		int messagesWritten = 0;
-
-		if(canWrite)
-		{
-			if(tryWrite(&messagesWritten))
-				processEvents(&readyRead, &messagesWritten);
-		}
-
-		if(canRead)
-		{
-			if(tryRead(&readyRead))
-				processEvents(&readyRead, &messagesWritten);
-		}
-
-		if(readyRead)
-			emit q->readyRead();
-
-		if(messagesWritten > 0)
-			emit q->messagesWritten(messagesWritten);
+		doUpdate();
 	}
 };
 
@@ -731,7 +714,7 @@ bool Socket::bind(const QString &addr)
 
 bool Socket::canRead() const
 {
-	return d->readComplete;
+	return d->canRead;
 }
 
 bool Socket::canWriteImmediately() const

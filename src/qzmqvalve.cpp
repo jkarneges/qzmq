@@ -81,12 +81,17 @@ public:
 			emit q->readyRead(msg);
 			if(!self)
 				return;
+
+			++count;
 		}
 	}
 
 private slots:
 	void sock_readyRead()
 	{
+		if(pendingRead)
+			return;
+
 		tryRead();
 	}
 

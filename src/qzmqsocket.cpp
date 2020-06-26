@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2016 Justin Karneges
+ * Copyright (C) 2012-2020 Justin Karneges
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -371,7 +371,7 @@ public:
 			context = addGlobalContextRef();
 		}
 
-		int ztype;
+		int ztype = 0;
 		switch(type)
 		{
 			case Socket::Pair: ztype = ZMQ_PAIR; break;

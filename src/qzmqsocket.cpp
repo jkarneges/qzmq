@@ -119,11 +119,19 @@ static bool get_rcvmore(void *sock)
 
 static int get_events(void *sock)
 {
-	int events;
-	size_t opt_len = sizeof(events);
-	int ret = zmq_getsockopt(sock, ZMQ_EVENTS, &events, &opt_len);
-	assert(ret == 0);
-	return (int)events;
+	while(true)
+	{
+		int events;
+		size_t opt_len = sizeof(events);
+
+		int ret = zmq_getsockopt(sock, ZMQ_EVENTS, &events, &opt_len);
+		if(ret == 0)
+		{
+			return (int)events;
+		}
+
+		assert(errno == EINTR);
+	}
 }
 
 static int get_sndhwm(void *sock)
@@ -216,11 +224,19 @@ static bool get_rcvmore(void *sock)
 
 static int get_events(void *sock)
 {
-	quint32 events;
-	size_t opt_len = sizeof(events);
-	int ret = zmq_getsockopt(sock, ZMQ_EVENTS, &events, &opt_len);
-	assert(ret == 0);
-	return (int)events;
+	while(true)
+	{
+		quint32 events;
+		size_t opt_len = sizeof(events);
+
+		int ret = zmq_getsockopt(sock, ZMQ_EVENTS, &events, &opt_len);
+		if(ret == 0)
+		{
+			return (int)events;
+		}
+
+		assert(errno == EINTR);
+	}
 }
 
 static int get_hwm(void *sock)

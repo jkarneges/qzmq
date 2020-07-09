@@ -502,13 +502,10 @@ public:
 		}
 		else
 		{
-			if(!zmqWrite(message))
+			if(zmqWrite(message))
 			{
-				// if send fails, there should not be any events change
-				return;
+				++pendingWritten;
 			}
-
-			++pendingWritten;
 
 			processEvents();
 
@@ -533,37 +530,33 @@ public:
 
 	bool zmqWrite(const QList<QByteArray> &message)
 	{
-		bool wrotePart = false;
-
 		for(int n = 0; n < message.count(); ++n)
 		{
 			const QByteArray &buf = message[n];
 
 			zmq_msg_t msg;
+
 			int ret = zmq_msg_init_size(&msg, buf.size());
 			assert(ret == 0);
+
 			memcpy(zmq_msg_data(&msg), buf.data(), buf.size());
+
 #ifdef USE_MSG_IO
 			ret = zmq_msg_send(&msg, sock, ZMQ_DONTWAIT | (n + 1 < message.count() ? ZMQ_SNDMORE : 0));
 #else
 			ret = zmq_send(sock, &msg, ZMQ_NOBLOCK | (n + 1 < message.count() ? ZMQ_SNDMORE : 0));
 #endif
-			if(ret == -1)
+
+			if(ret < 0)
 			{
-				// if we error after writing a message part, that's really bad
-				assert(!wrotePart);
-
-				assert(errno == EAGAIN);
-
 				ret = zmq_msg_close(&msg);
 				assert(ret == 0);
+
 				return false;
 			}
 
 			ret = zmq_msg_close(&msg);
 			assert(ret == 0);
-
-			wrotePart = true;
 		}
 
 		return true;
@@ -577,14 +570,11 @@ public:
 			//   can't write afterwards
 			canWrite = false;
 
-			if(!zmqWrite(pendingWrites.first()))
+			if(zmqWrite(pendingWrites.first()))
 			{
-				// if send fails, there should not be any events change
-				return;
+				pendingWrites.removeFirst();
+				++pendingWritten;
 			}
-
-			pendingWrites.removeFirst();
-			++pendingWritten;
 
 			processEvents();
 		}

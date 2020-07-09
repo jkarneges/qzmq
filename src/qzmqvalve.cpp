@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2016 Justin Karneges
+ * Copyright (C) 2012-2020 Justin Karneges
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -78,9 +78,13 @@ public:
 			}
 
 			QList<QByteArray> msg = sock->read();
-			emit q->readyRead(msg);
-			if(!self)
-				return;
+
+			if(!msg.isEmpty())
+			{
+				emit q->readyRead(msg);
+				if(!self)
+					return;
+			}
 
 			++count;
 		}

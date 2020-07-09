@@ -443,18 +443,32 @@ public:
 		{
 			QList<QByteArray> out;
 
+			bool ok = true;
+
 			do
 			{
 				zmq_msg_t msg;
+
 				int ret = zmq_msg_init(&msg);
 				assert(ret == 0);
+
 #ifdef USE_MSG_IO
-				ret = zmq_msg_recv(&msg, sock, 0);
+				ret = zmq_msg_recv(&msg, sock, ZMQ_DONTWAIT);
 #else
-				ret = zmq_recv(sock, &msg, 0);
+				ret = zmq_recv(sock, &msg, ZMQ_NOBLOCK);
 #endif
-				assert(ret != -1);
+
+				if(ret < 0)
+				{
+					ret = zmq_msg_close(&msg);
+					assert(ret == 0);
+
+					ok = false;
+					break;
+				}
+
 				QByteArray buf((const char *)zmq_msg_data(&msg), zmq_msg_size(&msg));
+
 				ret = zmq_msg_close(&msg);
 				assert(ret == 0);
 
@@ -466,7 +480,10 @@ public:
 			if((canWrite && !pendingWrites.isEmpty()) || canRead)
 				update();
 
-			return out;
+			if(ok)
+				return out;
+			else
+				return QList<QByteArray>();
 		}
 		else
 			return QList<QByteArray>();
